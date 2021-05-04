@@ -1,0 +1,18 @@
+title = "instance templates"
+
+[settings]
+default_collision_mode = "fail"
+
+[templates.nix]
+default = './default.nix'
+shell = './shell.nix'
+
+[templates.nix.lang]
+rust = { path = './rust.dev.shell.nix', name = 'shell.nix' }
+
+[templates.md]
+readme = './README.md'
+
+[templates.gitignore]
+collision_mode = "append"
+cargo = { path = './cargo-defaults.gitignore', name = '.gitignore' }
