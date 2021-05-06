@@ -13,5 +13,10 @@ mkShell {
 
   CARGO_NET_GIT_FETCH_WITH_CLI = "true";
 
-  INSTANCE_TEMPLATE_DIR = /home/bootstrap/projects/instance/templates;
+  shellHook = ''
+    export INSTANCE_TEMPLATE_DIR="$(pwd)/templates";
+    export PATH="$(pwd)/target/debug/instance:$PATH";
+  '';
+
+  #INSTANCE_TEMPLATE_DIR = /home/bootstrap/projects/instance/templates;
 }

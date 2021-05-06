@@ -1,7 +1,9 @@
 use clap::{App, Arg};
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::{env, fs, path::PathBuf};
+use std::{env, path::PathBuf};
+use std::{fs, fs::OpenOptions};
+use std::io::Write;
 
 static DEFAULT_CONFIG_NAME: &str = "instance_config.toml";
 static SETTINGS_DEFAULT_BEHAVIOR: Behavior = Behavior::Fail;
@@ -80,7 +82,7 @@ fn main() -> anyhow::Result<()> {
         .into_iter()
         .map(|(_id, templ)| templ)
         .collect();
-    let _settings_data: Settings = file_input.settings;
+    let settings_data: Settings = file_input.settings;
 
     // validate template: ensure all template definitions are valid
     let invalid_templates = validate_template(&template_dir_path, &template_data);
@@ -111,7 +113,6 @@ fn main() -> anyhow::Result<()> {
 
     // copy template to working directory
     if let Some(o) = matches.value_of("template") {
-        //println!("{}", current_dir.into_os_string().into_string().unwrap());
         let get_val = template_data
             .iter()
             .find(|&element| element.call_name.eq_ignore_ascii_case(o));
@@ -121,11 +122,35 @@ fn main() -> anyhow::Result<()> {
             Some(element) => {
                 let file_path_source: PathBuf = [&template_dir_path, &element.path].iter().collect();
                 let file_path_destin: PathBuf = [&current_dir, &PathBuf::from(element.rename.as_ref().unwrap_or(&element.path.clone()))].iter().collect();
-                println!(
-                    "template: {} at {:?}",
-                    &element.call_name, &file_path_source
-                );
-                fs::copy(file_path_source, file_path_destin)?;
+                if file_path_destin.exists() {
+                    match element.behavior.clone().unwrap_or(settings_data.default_behavior.unwrap_or(SETTINGS_DEFAULT_BEHAVIOR.clone())) {
+                        Behavior::Fail => {
+                            println!("Error, file already exists and the setting for this template on conflict is failure.");
+                            std::process::exit(-1);
+                        },
+                        Behavior::Append => {
+                            let source_data = fs::read_to_string(&file_path_source)?;
+                            let mut dest_file = OpenOptions::new()
+                                .write(true)
+                                .append(true)
+                                .open(&file_path_destin)?;
+                            dest_file.write_all(source_data.as_bytes())?;
+                            // if let Err(e) = writeln!(dest_file, "{}", source_data) {
+                            //     eprintln!("Couldn't write to file: {}", e);
+                            // }
+                        },
+                        Behavior::Overwrite => {
+                            fs::remove_file(&file_path_destin)?;
+                            fs::copy(&file_path_source, &file_path_destin)?;
+                        },
+                    }
+                } else {
+                    println!(
+                        "template: {} at {:?}",
+                        &element.call_name, &file_path_source
+                    );
+                    fs::copy(&file_path_source, &file_path_destin)?;
+                }
             }
         };
     }
@@ -146,5 +171,3 @@ fn validate_template<'a>(root_data: &'a str, template_data: &'a [Template]) -> V
         })
         .collect::<Vec<&Template>>()
 }
-
-//fn copy_val_to_
