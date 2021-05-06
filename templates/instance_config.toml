@@ -1,18 +1,29 @@
 title = "instance templates"
 
 [settings]
-default_collision_mode = "fail"
+# what happens when a file with the same name is already there
+default_behavior = "fail"
 
-[templates.nix]
-default = './default.nix'
-shell = './shell.nix'
+[templates.nix-default-file]
+path = "./default.nix"
+call_name = "nix.default"
 
-[templates.nix.lang]
-rust = { path = './rust.dev.shell.nix', name = 'shell.nix' }
+[templates.nix-shell-file]
+path = "./shell.nix"
+call_name = "nix.shell"
 
-[templates.md]
-readme = './README.md'
+[templates.nix-rust-file]
+rename = "shell.nix"
+path = "./rust.dev.shell.nix"
+call_name = "nix.lang.rust.dev"
 
-[templates.gitignore]
-collision_mode = "append"
-cargo = { path = './cargo-defaults.gitignore', name = '.gitignore' }
+[templates.readme-file]
+rename = "README.md"
+path = "./README.md"
+call_name = "md.readme"
+
+[templates.ignore-targets-cargo]
+rename = ".gitignore"
+path = "./cargo-defaults.gitignore"
+call_name = "gitignore.cargo"
+behavior = "append"
