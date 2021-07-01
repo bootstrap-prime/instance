@@ -26,5 +26,7 @@ Pull requests are welcome. For major changes, please open an issue first to disc
 Please make sure to update tests as appropriate.
 
 ## License
+This readme based on [makeareadme](https://www.makeareadme.com/) 
+A license can be chosen at [choosealicense](https://choosealicense.com/)
 [MIT](https://choosealicense.com/licenses/mit/)
 
