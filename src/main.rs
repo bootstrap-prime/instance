@@ -7,6 +7,7 @@ use std::{fs, fs::OpenOptions};
 
 static DEFAULT_CONFIG_NAME: &str = "instance_config.toml";
 static SETTINGS_DEFAULT_BEHAVIOR: Behavior = Behavior::Fail;
+static USE_NIX_SHELL: bool = true;
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Template {
@@ -96,11 +97,16 @@ fn main() -> anyhow::Result<()> {
         .value_of("config")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
-            env::var("INSTANCE_TEMPLATE_DIR").map(PathBuf::from).unwrap_or_else(|_| {
-                home::home_dir()
-                    .map(|mut path| {path.push(".templates"); path})
-                    .expect("Couldn't find home directory")
-            })
+            env::var("INSTANCE_TEMPLATE_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| {
+                    home::home_dir()
+                        .map(|mut path| {
+                            path.push(".templates");
+                            path
+                        })
+                        .expect("Couldn't find home directory")
+                })
         });
 
     // read data from config file
@@ -246,7 +252,10 @@ fn main() -> anyhow::Result<()> {
 // check to see if all templates exist
 // passes back a list of invalid templates
 // TODO: use error handling with this validator to handle it as an error instead of like this
-fn validate_template<'a>(root_data: &'a PathBuf, template_data: &'a [Template]) -> Vec<&'a Template> {
+fn validate_template<'a>(
+    root_data: &'a PathBuf,
+    template_data: &'a [Template],
+) -> Vec<&'a Template> {
     template_data
         .iter()
         .filter(|element| {
@@ -371,7 +380,7 @@ fn instantiate_template(
             // automatically integrates with nix-shell shebangs for user convenience.
             println!("script: {} at {:?}", &element.call_name, &file_path_source);
 
-            let output = std::process::Command::new("sh")
+            let output = std::process::Command::new(if USE_NIX_SHELL {"nix-shell"} else {"sh"})
                 .arg(&file_path_source)
                 .output()
                 .expect("Error, something went wrong when trying to execute script.");
