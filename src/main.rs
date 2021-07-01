@@ -7,7 +7,6 @@ use std::{fs, fs::OpenOptions};
 
 static DEFAULT_CONFIG_NAME: &str = "instance_config.toml";
 static SETTINGS_DEFAULT_BEHAVIOR: Behavior = Behavior::Fail;
-static DEFAULT_CONFIG_DIR: &str = "~/.templates";
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Template {
@@ -92,18 +91,21 @@ fn main() -> anyhow::Result<()> {
     let current_dir = env::current_dir()?;
 
     // figures out where the configuration is
-    // order of priority is (most important to least) [given config -> env var -> default directory]
-    let template_dir_path = match matches.value_of("config") {
-        Some(value) => value.to_string(),
-        None => match env::var("INSTANCE_TEMPLATE_DIR") {
-            Ok(value) => value,
-            Err(_) => DEFAULT_CONFIG_DIR.to_string(),
-        },
-    };
+    // order of priority is (most important to least) [given config -> env var -> default directory (which is ~/.templates)]
+    let template_dir_path = matches
+        .value_of("config")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            env::var("INSTANCE_TEMPLATE_DIR").map(PathBuf::from).unwrap_or_else(|_| {
+                home::home_dir()
+                    .map(|mut path| {path.push(".templates"); path})
+                    .expect("Couldn't find home directory")
+            })
+        });
 
     // read data from config file
     let file_input: Config = toml::from_str(&{
-        let config_path: PathBuf = [&template_dir_path, &DEFAULT_CONFIG_NAME.to_string()]
+        let config_path: PathBuf = [&template_dir_path, &PathBuf::from(DEFAULT_CONFIG_NAME)]
             .iter()
             .collect();
         fs::read_to_string(&config_path)?
@@ -244,11 +246,11 @@ fn main() -> anyhow::Result<()> {
 // check to see if all templates exist
 // passes back a list of invalid templates
 // TODO: use error handling with this validator to handle it as an error instead of like this
-fn validate_template<'a>(root_data: &'a str, template_data: &'a [Template]) -> Vec<&'a Template> {
+fn validate_template<'a>(root_data: &'a PathBuf, template_data: &'a [Template]) -> Vec<&'a Template> {
     template_data
         .iter()
         .filter(|element| {
-            ![root_data, &element.path]
+            ![root_data, &PathBuf::from(element.path.as_str())]
                 .iter()
                 .collect::<PathBuf>()
                 .exists()
@@ -287,16 +289,22 @@ fn validate_project<'a>(
 fn instantiate_project(
     element: &Project,
     file_path_destin: &PathBuf,
-    template_source_path: &str,
+    template_source_path: &PathBuf,
     settings_data: &Settings,
     templates: &Vec<Template>,
 ) -> anyhow::Result<()> {
     for template in &element.templates {
         let template_ref = &templates
             .iter()
-            .find(|&element| element.call_name.eq_ignore_ascii_case(&template)).unwrap();
+            .find(|&element| element.call_name.eq_ignore_ascii_case(&template))
+            .unwrap();
 
-        instantiate_template(template_ref, &file_path_destin, &template_source_path, &settings_data)?;
+        instantiate_template(
+            template_ref,
+            &file_path_destin,
+            &template_source_path,
+            &settings_data,
+        )?;
     }
 
     Ok(())
@@ -306,10 +314,10 @@ fn instantiate_project(
 fn instantiate_template(
     element: &Template,
     base_path: &PathBuf,
-    template_source_path: &str,
+    template_source_path: &PathBuf,
     settings_data: &Settings,
 ) -> anyhow::Result<()> {
-    let file_path_source: PathBuf = [&template_source_path, &element.path.as_str()]
+    let file_path_source: PathBuf = [&template_source_path, &PathBuf::from(element.path.as_str())]
         .iter()
         .collect();
 
@@ -337,7 +345,6 @@ fn instantiate_template(
                 }) {
                     // deal with file collisions (if a file is already present)
                     // multiple options: fail (just fail the whole thing), append (like for gitignore), overwrite (ignore the past and destroy it)
-
                     Behavior::Fail => {
                         println!("Error, file already exists and the setting for this template on conflict is failure.");
                         std::process::exit(-1)
