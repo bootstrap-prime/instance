@@ -5,25 +5,59 @@ title = "instance templates"
 default_behavior = "fail"
 
 [templates.nix-default-file]
+type = "template"
 path = "./default.nix"
 call_name = "nix.default"
 
 [templates.nix-shell-file]
+type = "template"
 path = "./shell.nix"
 call_name = "nix.shell"
 
 [templates.nix-rust-file]
+type = "template"
 rename = "shell.nix"
 path = "./rust.dev.shell.nix"
 call_name = "nix.lang.rust.dev"
 
 [templates.readme-file]
+type = "template"
 rename = "README.md"
 path = "./README.md"
 call_name = "md.readme"
 
 [templates.ignore-targets-cargo]
+type = "template"
 rename = ".gitignore"
 path = "./cargo-defaults.gitignore"
 call_name = "gitignore.cargo"
 behavior = "append"
+
+[templates.git-init]
+type = "script"
+path = "./git-init.sh"
+call_name = "git-init"
+
+[templates.cargo-init]
+type = "script"
+path = "./cargo-init.sh"
+call_name = "cargo-init"
+
+[projects.rust-project]
+templates = [
+  "gitignore.cargo",
+  "md.readme",
+  "nix.lang.rust.dev",
+  "git-init",
+  "cargo-init",
+]
+call_name = "project.rust"
+
+[projects.nix-project]
+templates = [
+  "nix.shell",
+  "nix.default",
+  "git-init",
+  "md.readme",
+]
+call_name = "project.nix"
