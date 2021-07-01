@@ -15,8 +15,8 @@ mkShell {
 
   CARGO_NET_GIT_FETCH_WITH_CLI = "true";
   # courtesy of https://discourse.nixos.org/t/rust-src-not-found-and-other-misadventures-of-developing-rust-on-nixos/11570/10
-  RUST_SRC_PATH = "${rust.packages.stable.rustPlatform.rustLibSrc}";
-  RACER_RUST_SRC_PATH = "${rust.packages.stable.rustPlatform.rustLibSrc}";
+  # RUST_SRC_PATH = "${rust.packages.stable.rustPlatform.rustLibSrc}";
+  # RACER_RUST_SRC_PATH = "${rust.packages.stable.rustPlatform.rustLibSrc}";
   #RACER_CMD = "${pkgs.rustracer}/bin/racer";
 
   # shellHook = ''
