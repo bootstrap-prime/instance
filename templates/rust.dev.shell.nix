@@ -14,4 +14,5 @@ mkShell {
   ];
 
   CARGO_NET_GIT_FETCH_WITH_CLI = "true";
+  RUST_SRC_PATH = "${rust.packages.stable.rustPlatform.rustLibSrc}";
 }
