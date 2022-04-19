@@ -2,6 +2,7 @@ use clap::{App, Arg};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::io::{self, Write};
+use std::path::Path;
 use std::{env, path::PathBuf};
 use std::{fs, fs::OpenOptions};
 
@@ -258,12 +259,7 @@ fn validate_template<'a>(
 ) -> Vec<&'a Template> {
     template_data
         .iter()
-        .filter(|element| {
-            ![root_data, &PathBuf::from(element.path.as_str())]
-                .iter()
-                .collect::<PathBuf>()
-                .exists()
-        })
+        .filter(|element| !root_data.as_path().join(element.path.as_str()).exists())
         .collect::<Vec<&Template>>()
 }
 
