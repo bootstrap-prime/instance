@@ -237,7 +237,6 @@ fn validate_template<'a>(
 }
 
 // check to see if all subtemplates exists and if the project's defined properly
-// TODO: use error handling (again)
 fn validate_project<'a>(
     template_data: &'a [Template],
     project_data: &'a [Project],
@@ -246,19 +245,15 @@ fn validate_project<'a>(
         .iter()
         // this is a list of INVALID projects. this filter removes VALID projects.
         .filter(|element| {
-            for called_template in &element.templates {
-                if !template_data
+            // find projects that call on nonexistent templates
+            element.templates.iter().any(|called_template| {
+                !template_data
                     .iter()
-                    .map(|e| &e.call_name)
-                    .collect::<Vec<&String>>()
-                    .contains(&called_template)
-                {
-                    // don't filter it out of the list of invalid projects if it's invalid
-                    return true;
-                }
-            }
-            // filter it out of the list if it's valid
-            false
+                    // check if there are any templates in the list of all templates that match this
+                    // specific template
+                    .any(|e| e.call_name == **called_template)
+                // we are looking for templates called by a project that do not exist in the list of all templates.
+            })
         })
         .collect::<Vec<&Project>>()
 }
@@ -269,7 +264,7 @@ fn instantiate_project(
     file_path_destin: &PathBuf,
     template_source_path: &PathBuf,
     settings_data: &Settings,
-    templates: &Vec<Template>,
+    templates: &[Template],
 ) -> anyhow::Result<()> {
     for template in &element.templates {
         let template_ref = &templates
