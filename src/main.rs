@@ -1,3 +1,6 @@
+#![feature(let_chains)]
+
+use anyhow::{anyhow, Context};
 use clap::{App, Arg};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -130,57 +133,28 @@ fn main() -> anyhow::Result<()> {
     // validate template: ensure all template definitions are valid
     let invalid_templates = validate_template(&template_dir_path, &template_data);
     if !invalid_templates.is_empty() {
-        println!(
-            //TODO: if there's a nicer way to handle plurals in this, that would be amazing. but I haven't found one.
-            "There {} {} invalid template{}: \n{}",
-            match invalid_templates.len() {
-                1 => "is",
-                _ => "are",
-            },
-            invalid_templates.len(),
-            match invalid_templates.len() {
-                1 => "",
-                _ => "s",
-            },
-            {
-                &invalid_templates
-                    .iter()
-                    .map(|element| element.call_name.to_string())
-                    .collect::<Vec<String>>()
-                    .join("\n")
-            },
-        );
-        std::process::exit(-1);
+        Err(anyhow!("Invalid templates: \n{}", {
+            &invalid_templates
+                .iter()
+                .map(|element| element.call_name.to_string())
+                .collect::<Vec<String>>()
+                .join("\n")
+        }))?;
     }
 
     // validate projects: ensure all projects are valid
-    match &project_data {
-        Some(project_data) => {
-            let invalid_projects = validate_project(&template_data, &project_data);
-            if !invalid_projects.is_empty() {
-                println!(
-                    "There {} {} invalid project{}: \n{}",
-                    match invalid_projects.len() {
-                        1 => "is",
-                        _ => "are",
-                    },
-                    invalid_projects.len(),
-                    match invalid_projects.len() {
-                        1 => "",
-                        _ => "s",
-                    },
-                    {
-                        &invalid_projects
-                            .iter()
-                            .map(|element| element.call_name.to_string())
-                            .collect::<Vec<String>>()
-                            .join("\n")
-                    },
-                );
-                std::process::exit(-1);
-            }
-        }
-        None => (),
+    let invalid_projects = project_data
+        .as_ref()
+        .map(|projects| validate_project(&template_data, &projects));
+
+    if let Some(invalid_projects) = invalid_projects && !invalid_projects.is_empty() {
+        Err(anyhow!("Invalid projects: \n{}", {
+            &invalid_projects
+                .iter()
+                .map(|element| element.call_name.to_string())
+                .collect::<Vec<String>>()
+                .join("\n")
+        }))?;
     }
 
     // list elements provided by config
@@ -209,26 +183,25 @@ fn main() -> anyhow::Result<()> {
 
     // instance all the templates in a project
     if let Some(o) = matches.value_of("project") {
-        match project_data {
-            Some(project_data) => {
-                let get_val = project_data
+        let possible_project = project_data
+            .as_ref()
+            .map(|project| {
+                project
                     .iter()
-                    .find(|&element| element.call_name.eq_ignore_ascii_case(o));
+                    .find(|element| element.call_name.eq_ignore_ascii_case(o))
+            })
+            .flatten();
 
-                match get_val {
-                    None => println!("name did not match any project on record."),
-                    Some(element) => {
-                        instantiate_project(
-                            element,
-                            &current_dir,
-                            &template_dir_path,
-                            &settings_data,
-                            &template_data,
-                        )?;
-                    }
-                };
-            }
-            None => println!("No projects included in configuration file."),
+        if let Some(project) = possible_project {
+            instantiate_project(
+                project,
+                &current_dir,
+                &template_dir_path,
+                &settings_data,
+                &template_data,
+            )?;
+        } else {
+            Err(anyhow!(format!("{} is not a project on record.", o)))?;
         }
     }
 
@@ -240,7 +213,7 @@ fn main() -> anyhow::Result<()> {
             .find(|&element| element.call_name.eq_ignore_ascii_case(o));
 
         match get_val {
-            None => println!("name did not match any template on record."),
+            None => Err(anyhow!(format!("{} is not a template on record.", o)))?,
             Some(element) => {
                 instantiate_template(element, &current_dir, &template_dir_path, &settings_data)?;
             }
@@ -351,8 +324,7 @@ fn instantiate_template(
                     // deal with file collisions (if a file is already present)
                     // multiple options: fail (just fail the whole thing), append (like for gitignore), overwrite (ignore the past and destroy it)
                     Behavior::Fail => {
-                        println!("Error, file already exists and the setting for this template on conflict is failure.");
-                        std::process::exit(-1)
+                        Err(anyhow!("file already exists and the setting for this template on conflict is failure."))?
                     }
                     Behavior::Append => {
                         let source_data = fs::read_to_string(&file_path_source)?;
@@ -379,14 +351,17 @@ fn instantiate_template(
             let output = std::process::Command::new(if USE_NIX_SHELL {"nix-shell"} else {"sh"})
                 .arg(&file_path_source)
                 .output()
-                .expect("Error, something went wrong when trying to execute script.");
+                .context(format!(
+                    "something went wrong when trying to execute {}",
+                    &file_path_source.display(),
+                ))?;
 
             io::stdout()
                 .write_all(&output.stdout)
-                .expect("Couldn't write to stdout");
+                .context("Couldn't write to stdout")?;
             io::stderr()
                 .write_all(&output.stderr)
-                .expect("Couldn't write to stdout");
+                .context("Couldn't write to stderr")?;
         }
     }
 
