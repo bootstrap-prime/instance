@@ -392,15 +392,3 @@ fn instantiate_template(
 
     Ok(())
 }
-
-// fn copy_files(source_dir: &Path, dest_dir: &Path) {
-//     use std::process::Command;
-//     Command::new("sh")
-//         .arg("-c")
-//         .arg("cp")
-//         .arg("--reflink=auto")
-//         .arg("--recursive")
-//         .arg(format!("{}", source_dir))
-//         .arg(format!("{}", dest_dir))
-//         .output()
-// }
