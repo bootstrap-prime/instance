@@ -10,6 +10,7 @@ edition = "2018"
 clap = "2.33.3"
 home = "0.5.3"
 miette = { version = "4.5.0", features = ["fancy"] }
+rayon = "1.5.2"
 serde = { version = "1.0.125", features = ["derive"] }
 thiserror = "1.0.24"
 toml = "0.5.8"

@@ -268,11 +268,14 @@ fn instantiate_project(
     template_source_path: &PathBuf,
     settings_data: &Settings,
     templates: &[Template],
-    for template in &element.templates {
 ) -> Result<()> {
+    use rayon::prelude::*;
+
+    element.templates.par_iter().try_for_each(|template| {
         let template_ref = &templates
             .iter()
             .find(|&element| element.call_name.eq_ignore_ascii_case(&template))
+            // we are assuming the validation logic caught this
             .unwrap();
 
         instantiate_template(
@@ -280,8 +283,8 @@ fn instantiate_project(
             &file_path_destin,
             &template_source_path,
             &settings_data,
-        )?;
-    }
+        )
+    })?;
 
     Ok(())
 }
