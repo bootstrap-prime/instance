@@ -343,7 +343,7 @@ fn instantiate_template(
             // automatically integrates with nix-shell shebangs for user convenience.
             println!("script: {} at {:?}", &element.call_name, &file_path_source);
 
-            let output = std::process::Command::new(if USE_NIX_SHELL {"nix-shell"} else {"sh"})
+            let output = std::process::Command::new(if USE_NIX_SHELL { "nix-shell" } else { "sh" })
                 .arg(&file_path_source)
                 .output()
                 .context(format!(
