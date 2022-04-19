@@ -1,7 +1,7 @@
 #![feature(let_chains)]
 
-use anyhow::{anyhow, Context};
 use clap::{App, Arg};
+use miette::{bail, Context, IntoDiagnostic, Result};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::io::{self, Write};
@@ -66,7 +66,7 @@ pub struct Config {
     projects: Option<HashMap<String, Project>>,
 }
 
-fn main() -> anyhow::Result<()> {
+fn main() -> miette::Result<()> {
     // instance cli interface
     let matches = App::new("instance")
         .version("0.1.0")
@@ -93,7 +93,7 @@ fn main() -> anyhow::Result<()> {
              .takes_value(true))
         .get_matches();
 
-    let current_dir = env::current_dir()?;
+    let current_dir = env::current_dir().into_diagnostic()?;
 
     // figures out where the configuration is
     // order of priority is (most important to least) [given config -> env var -> default directory (which is ~/.templates)]
@@ -118,8 +118,11 @@ fn main() -> anyhow::Result<()> {
         let config_path: PathBuf = [&template_dir_path, &PathBuf::from(DEFAULT_CONFIG_NAME)]
             .iter()
             .collect();
-        fs::read_to_string(&config_path)?
-    })?;
+        fs::read_to_string(&config_path).into_diagnostic()?
+    })
+    .into_diagnostic()
+    .context("Failed to parse configuration")?;
+
     let template_data: Vec<Template> = file_input
         .templates
         .into_iter()
@@ -133,13 +136,13 @@ fn main() -> anyhow::Result<()> {
     // validate template: ensure all template definitions are valid
     let invalid_templates = validate_template(&template_dir_path, &template_data);
     if !invalid_templates.is_empty() {
-        Err(anyhow!("Invalid templates: \n{}", {
+        bail!("Invalid templates: \n{}", {
             &invalid_templates
                 .iter()
                 .map(|element| element.call_name.to_string())
                 .collect::<Vec<String>>()
                 .join("\n")
-        }))?;
+        });
     }
 
     // validate projects: ensure all projects are valid
@@ -148,13 +151,13 @@ fn main() -> anyhow::Result<()> {
         .map(|projects| validate_project(&template_data, &projects));
 
     if let Some(invalid_projects) = invalid_projects && !invalid_projects.is_empty() {
-        Err(anyhow!("Invalid projects: \n{}", {
+        bail!("Invalid projects: \n{}", {
             &invalid_projects
                 .iter()
                 .map(|element| element.call_name.to_string())
                 .collect::<Vec<String>>()
                 .join("\n")
-        }))?;
+        });
     }
 
     // list elements provided by config
@@ -201,7 +204,7 @@ fn main() -> anyhow::Result<()> {
                 &template_data,
             )?;
         } else {
-            Err(anyhow!(format!("{} is not a project on record.", o)))?;
+            bail!("{} is not a project on record.", o);
         }
     }
 
@@ -213,7 +216,7 @@ fn main() -> anyhow::Result<()> {
             .find(|&element| element.call_name.eq_ignore_ascii_case(o));
 
         match get_val {
-            None => Err(anyhow!(format!("{} is not a template on record.", o)))?,
+            None => bail!("{} is not a template on record.", o),
             Some(element) => {
                 instantiate_template(element, &current_dir, &template_dir_path, &settings_data)?;
             }
@@ -265,8 +268,8 @@ fn instantiate_project(
     template_source_path: &PathBuf,
     settings_data: &Settings,
     templates: &[Template],
-) -> anyhow::Result<()> {
     for template in &element.templates {
+) -> Result<()> {
         let template_ref = &templates
             .iter()
             .find(|&element| element.call_name.eq_ignore_ascii_case(&template))
@@ -289,7 +292,7 @@ fn instantiate_template(
     base_path: &PathBuf,
     template_source_path: &PathBuf,
     settings_data: &Settings,
-) -> anyhow::Result<()> {
+) -> Result<()> {
     let file_path_source: PathBuf = [&template_source_path, &PathBuf::from(element.path.as_str())]
         .iter()
         .collect();
@@ -319,23 +322,27 @@ fn instantiate_template(
                     // deal with file collisions (if a file is already present)
                     // multiple options: fail (just fail the whole thing), append (like for gitignore), overwrite (ignore the past and destroy it)
                     Behavior::Fail => {
-                        Err(anyhow!("file already exists and the setting for this template on conflict is failure."))?
+                        bail!("file already exists and the setting for this template on conflict is failure.")
                     }
                     Behavior::Append => {
-                        let source_data = fs::read_to_string(&file_path_source)?;
+                        let source_data =
+                            fs::read_to_string(&file_path_source).into_diagnostic()?;
                         let mut dest_file = OpenOptions::new()
                             .write(true)
                             .append(true)
-                            .open(&file_path_destin)?;
-                        dest_file.write_all(source_data.as_bytes())?;
+                            .open(&file_path_destin)
+                            .into_diagnostic()?;
+                        dest_file
+                            .write_all(source_data.as_bytes())
+                            .into_diagnostic()?;
                     }
                     Behavior::Overwrite => {
-                        fs::remove_file(&file_path_destin)?;
-                        fs::copy(&file_path_source, &file_path_destin)?;
+                        fs::remove_file(&file_path_destin).into_diagnostic()?;
+                        fs::copy(&file_path_source, &file_path_destin).into_diagnostic()?;
                     }
                 }
             } else {
-                fs::copy(&file_path_source, &file_path_destin)?;
+                fs::copy(&file_path_source, &file_path_destin).into_diagnostic()?;
             }
         }
         TemplateType::Script => {
@@ -346,6 +353,7 @@ fn instantiate_template(
             let output = std::process::Command::new(if USE_NIX_SHELL { "nix-shell" } else { "sh" })
                 .arg(&file_path_source)
                 .output()
+                .into_diagnostic()
                 .context(format!(
                     "something went wrong when trying to execute {}",
                     &file_path_source.display(),
@@ -353,9 +361,11 @@ fn instantiate_template(
 
             io::stdout()
                 .write_all(&output.stdout)
+                .into_diagnostic()
                 .context("Couldn't write to stdout")?;
             io::stderr()
                 .write_all(&output.stderr)
+                .into_diagnostic()
                 .context("Couldn't write to stderr")?;
         }
     }
