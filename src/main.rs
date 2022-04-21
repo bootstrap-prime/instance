@@ -32,7 +32,7 @@ pub struct Project {
     call_name: String,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Copy)]
 #[serde(rename_all = "lowercase")]
 pub enum Behavior {
     Fail,
@@ -40,7 +40,7 @@ pub enum Behavior {
     Overwrite,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Copy)]
 #[serde(rename_all = "lowercase")]
 pub enum TemplateType {
     Script,
@@ -177,13 +177,7 @@ fn main() -> miette::Result<()> {
             .flatten();
 
         if let Some(project) = possible_project {
-            instantiate_project(
-                project,
-                &current_dir,
-                &template_dir_path,
-                &settings_data,
-                &template_data,
-            )?;
+            instantiate_project(project, &current_dir)?;
         } else {
             bail!("{} is not a project on record.", o);
         }
@@ -199,7 +193,7 @@ fn main() -> miette::Result<()> {
         match get_val {
             None => bail!("{} is not a template on record.", o),
             Some(element) => {
-                instantiate_template(element, &current_dir, &template_dir_path, &settings_data)?;
+                instantiate_template(element, &current_dir)?;
             }
         };
     }
@@ -248,14 +242,15 @@ fn validate_template<'a>(
                 .unwrap_or_else(|_| root_data.as_path().join(&template.path));
 
             ValidTemplate {
-                path: possiblepath,
+                path: possiblepath.clone(),
                 ttype: template.ttype,
-                call_name: template.call_name,
+                call_name: template.call_name.clone(),
                 rename: template
                     .rename
+                    .clone()
                     .map(|e| e.into())
                     .unwrap_or_else(|| possiblepath.file_name().unwrap().into()),
-                behavior: template.behavior.unwrap_or_else(|| {
+                behavior: template.behavior.unwrap_or({
                     settings
                         .default_behavior
                         .unwrap_or(SETTINGS_DEFAULT_BEHAVIOR)
@@ -276,7 +271,6 @@ fn validate_project<'a>(
         .iter()
         .map(|project| {
             // Vec<String> -> Vec<&ValidTemplate>
-            // let templates =
             project
                 .templates
                 .iter()
@@ -290,87 +284,49 @@ fn validate_project<'a>(
                             template_name
                         ))
                 })
-                .collect::<Result<Vec<&ValidTemplate>, _>>()
-                // let templates = templates.
+                .collect::<Result<Vec<_>, _>>()
                 .map(|templates| ValidProject {
                     templates,
-                    call_name: project.call_name,
+                    call_name: project.call_name.clone(),
                 })
-
-            // templates
         })
         .collect()
 }
 
 // instance a project (and all the templates in it)
-fn instantiate_project(
-    element: &Project,
-    file_path_destin: &PathBuf,
-    template_source_path: &PathBuf,
-    settings_data: &Settings,
-    templates: &[Template],
-) -> miette::Result<()> {
+fn instantiate_project(element: &ValidProject, file_path_destin: &PathBuf) -> miette::Result<()> {
     use rayon::prelude::*;
 
-    element.templates.par_iter().try_for_each(|template| {
-        let template_ref = &templates
-            .iter()
-            .find(|&element| element.call_name.eq_ignore_ascii_case(&template))
-            // we are assuming the validation logic caught this
-            .unwrap();
-
-        instantiate_template(
-            template_ref,
-            &file_path_destin,
-            &template_source_path,
-            &settings_data,
-        )
-    })?;
+    element
+        .templates
+        .par_iter()
+        .try_for_each(|template| instantiate_template(template, &file_path_destin))?;
 
     Ok(())
 }
 
 // instance a template (whether script or file)
-fn instantiate_template(
-    element: &Template,
-    base_path: &PathBuf,
-    template_source_path: &PathBuf,
-    settings_data: &Settings,
-) -> miette::Result<()> {
-    let file_path_source: PathBuf = [&template_source_path, &PathBuf::from(element.path.as_str())]
-        .iter()
-        .collect();
-
-    let file_path_destin: PathBuf = [
-        &base_path,
-        &PathBuf::from(element.rename.as_ref().unwrap_or(&element.path)),
-    ]
-    .iter()
-    .collect();
+fn instantiate_template(element: &ValidTemplate, dest_path: &PathBuf) -> miette::Result<()> {
+    let file_path_destin: PathBuf = dest_path.as_path().join(&element.rename);
 
     match element.ttype {
         TemplateType::Template => {
             // UI for easier debugging and user notification
             println!(
-                "template: {} at {:?}",
-                &element.call_name, &file_path_source
+                "template: {} at {}",
+                &element.call_name,
+                &element.path.display()
             );
 
             if file_path_destin.exists() {
-                match &element.behavior.as_ref().unwrap_or_else(|| {
-                    settings_data
-                        .default_behavior
-                        .as_ref()
-                        .unwrap_or_else(|| &SETTINGS_DEFAULT_BEHAVIOR)
-                }) {
+                match &element.behavior {
                     // deal with file collisions (if a file is already present)
                     // multiple options: fail (just fail the whole thing), append (like for gitignore), overwrite (ignore the past and destroy it)
                     Behavior::Fail => {
                         bail!("file already exists and the setting for this template on conflict is failure.")
                     }
                     Behavior::Append => {
-                        let source_data =
-                            fs::read_to_string(&file_path_source).into_diagnostic()?;
+                        let source_data = fs::read_to_string(&element.path).into_diagnostic()?;
                         let mut dest_file = OpenOptions::new()
                             .write(true)
                             .append(true)
@@ -382,25 +338,25 @@ fn instantiate_template(
                     }
                     Behavior::Overwrite => {
                         fs::remove_file(&file_path_destin).into_diagnostic()?;
-                        fs::copy(&file_path_source, &file_path_destin).into_diagnostic()?;
+                        fs::copy(&element.path, &file_path_destin).into_diagnostic()?;
                     }
                 }
             } else {
-                fs::copy(&file_path_source, &file_path_destin).into_diagnostic()?;
+                fs::copy(&element.path, &file_path_destin).into_diagnostic()?;
             }
         }
         TemplateType::Script => {
             // for things like cargo init and git init
             // automatically integrates with nix-shell shebangs for user convenience.
-            println!("script: {} at {:?}", &element.call_name, &file_path_source);
+            println!("script: {} at {:?}", &element.call_name, &element.path);
 
             let output = std::process::Command::new(if USE_NIX_SHELL { "nix-shell" } else { "sh" })
-                .arg(&file_path_source)
+                .arg(&element.path)
                 .output()
                 .into_diagnostic()
                 .context(format!(
                     "something went wrong when trying to execute {}",
-                    &file_path_source.display(),
+                    &element.path.display(),
                 ))?;
 
             io::stdout()
