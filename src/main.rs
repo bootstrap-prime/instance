@@ -343,7 +343,7 @@ fn instantiate_template(
 
     let file_path_destin: PathBuf = [
         &base_path,
-        &PathBuf::from(element.rename.as_ref().unwrap_or(&element.path.clone())),
+        &PathBuf::from(element.rename.as_ref().unwrap_or(&element.path)),
     ]
     .iter()
     .collect();
