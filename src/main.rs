@@ -1,17 +1,17 @@
 #![feature(let_chains)]
 
 use clap::{App, Arg};
-use miette::{bail, Context, IntoDiagnostic, Result};
+use miette::{bail, Context, IntoDiagnostic};
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::io::{self, Write};
-use std::path::Path;
 use std::{env, path::PathBuf};
 use std::{fs, fs::OpenOptions};
 
-static DEFAULT_CONFIG_NAME: &str = "instance_config.toml";
-static SETTINGS_DEFAULT_BEHAVIOR: Behavior = Behavior::Fail;
-static USE_NIX_SHELL: bool = true;
+const DEFAULT_CONFIG_NAME: &str = "instance_config.toml";
+const SETTINGS_DEFAULT_BEHAVIOR: Behavior = Behavior::Fail;
+const USE_NIX_SHELL: bool = true;
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Template {
@@ -134,31 +134,12 @@ fn main() -> miette::Result<()> {
     let settings_data: Settings = file_input.settings;
 
     // validate template: ensure all template definitions are valid
-    let invalid_templates = validate_template(&template_dir_path, &template_data);
-    if !invalid_templates.is_empty() {
-        bail!("Invalid templates: \n{}", {
-            &invalid_templates
-                .iter()
-                .map(|element| element.call_name.to_string())
-                .collect::<Vec<String>>()
-                .join("\n")
-        });
-    }
-
+    let template_data = validate_template(&template_dir_path, &settings_data, &template_data)?;
     // validate projects: ensure all projects are valid
-    let invalid_projects = project_data
+    let project_data: Option<Vec<ValidProject>> = project_data
         .as_ref()
-        .map(|projects| validate_project(&template_data, &projects));
-
-    if let Some(invalid_projects) = invalid_projects && !invalid_projects.is_empty() {
-        bail!("Invalid projects: \n{}", {
-            &invalid_projects
-                .iter()
-                .map(|element| element.call_name.to_string())
-                .collect::<Vec<String>>()
-                .join("\n")
-        });
-    }
+        .map(|projects| validate_project(&template_data, &projects))
+        .transpose()?;
 
     // list elements provided by config
     if matches.is_present("list") {
@@ -226,39 +207,99 @@ fn main() -> miette::Result<()> {
     Ok(())
 }
 
-// check to see if all templates exist
-// passes back a list of invalid templates
-// TODO: use error handling with this validator to handle it as an error instead of like this
+pub struct ValidProject<'a> {
+    templates: Vec<&'a ValidTemplate>,
+    call_name: String,
+}
+
+pub struct ValidTemplate {
+    path: PathBuf,
+    ttype: TemplateType,
+    call_name: String,
+    rename: OsString,
+    behavior: Behavior,
+}
+
+// check to see if all templates exist and are valid
 fn validate_template<'a>(
     root_data: &'a PathBuf,
+    settings: &Settings,
     template_data: &'a [Template],
-) -> Vec<&'a Template> {
-    template_data
+) -> miette::Result<Vec<ValidTemplate>> {
+    let (invalid_templates, valid_templates): (Vec<&Template>, Vec<&Template>) = template_data
         .iter()
-        .filter(|element| !root_data.as_path().join(element.path.as_str()).exists())
-        .collect::<Vec<&Template>>()
+        .partition(|element| !root_data.as_path().join(element.path.as_str()).exists());
+
+    if !invalid_templates.is_empty() {
+        bail!("Path referenced by template could not be found: \n{}", {
+            &invalid_templates
+                .iter()
+                .map(|element| element.call_name.to_string())
+                .collect::<Vec<String>>()
+                .join("\n")
+        });
+    }
+
+    let validated_templates = valid_templates
+        .iter()
+        .map(|template| {
+            let possiblepath = PathBuf::from(&template.path)
+                .canonicalize()
+                .unwrap_or_else(|_| root_data.as_path().join(&template.path));
+
+            ValidTemplate {
+                path: possiblepath,
+                ttype: template.ttype,
+                call_name: template.call_name,
+                rename: template
+                    .rename
+                    .map(|e| e.into())
+                    .unwrap_or_else(|| possiblepath.file_name().unwrap().into()),
+                behavior: template.behavior.unwrap_or_else(|| {
+                    settings
+                        .default_behavior
+                        .unwrap_or(SETTINGS_DEFAULT_BEHAVIOR)
+                }),
+            }
+        })
+        .collect();
+
+    Ok(validated_templates)
 }
 
 // check to see if all subtemplates exists and if the project's defined properly
 fn validate_project<'a>(
-    template_data: &'a [Template],
+    template_data: &'a [ValidTemplate],
     project_data: &'a [Project],
-) -> Vec<&'a Project> {
+) -> miette::Result<Vec<ValidProject<'a>>> {
     project_data
         .iter()
-        // this is a list of INVALID projects. this filter removes VALID projects.
-        .filter(|element| {
-            // find projects that call on nonexistent templates
-            element.templates.iter().any(|called_template| {
-                !template_data
-                    .iter()
-                    // check if there are any templates in the list of all templates that match this
-                    // specific template
-                    .any(|e| e.call_name == **called_template)
-                // we are looking for templates called by a project that do not exist in the list of all templates.
-            })
+        .map(|project| {
+            // Vec<String> -> Vec<&ValidTemplate>
+            // let templates =
+            project
+                .templates
+                .iter()
+                .map(|template_name| {
+                    template_data
+                        .iter()
+                        .find(|actual_template| actual_template.call_name == *template_name)
+                        .ok_or(miette::miette!(
+                            "Project {} references nonexistent template: \n {}",
+                            project.call_name,
+                            template_name
+                        ))
+                })
+                .collect::<Result<Vec<&ValidTemplate>, _>>()
+                // let templates = templates.
+                .map(|templates| ValidProject {
+                    templates,
+                    call_name: project.call_name,
+                })
+
+            // templates
         })
-        .collect::<Vec<&Project>>()
+        .collect()
 }
 
 // instance a project (and all the templates in it)
@@ -268,7 +309,7 @@ fn instantiate_project(
     template_source_path: &PathBuf,
     settings_data: &Settings,
     templates: &[Template],
-) -> Result<()> {
+) -> miette::Result<()> {
     use rayon::prelude::*;
 
     element.templates.par_iter().try_for_each(|template| {
@@ -295,7 +336,7 @@ fn instantiate_template(
     base_path: &PathBuf,
     template_source_path: &PathBuf,
     settings_data: &Settings,
-) -> Result<()> {
+) -> miette::Result<()> {
     let file_path_source: PathBuf = [&template_source_path, &PathBuf::from(element.path.as_str())]
         .iter()
         .collect();
